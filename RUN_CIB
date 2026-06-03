@@ -1,0 +1,134 @@
+# RUN_CIB
+
+Operational runbook for joint 3-channel CIB synthesis at SPT-3G 95/150/220 GHz.
+Multi-channel analog of `RUN` (Compton-y). One UNet emits all three bands from
+shared noise so inter-band correlation is preserved; the WPH loss uses
+per-channel + cross-band features. Run steps in order.
+
+Inputs (lensed, no color correction — the only SPT-3G variant in the Agora
+products tree):
+
+    /global/cfs/cdirs/mp107c/yomori/agora/products/components/cib/nocc/len/spt3g/
+        agora_len_mag_cibmap_spt3g_095ghz.fits
+        agora_len_mag_cibmap_spt3g_150ghz.fits
+        agora_len_mag_cibmap_spt3g_220ghz.fits
+
+(Nside=8192, RING, strictly-positive intensity.) GPU steps must run on a
+compute node (e.g. `salloc ... --constraint gpu`), never the login node.
+
+------------------------------------------------------------------------------
+## 0. Environment
+
+    pip install -e ".[maps,viz,dev]"
+    pip install -U "jax[cuda12]"          # match your CUDA
+
+------------------------------------------------------------------------------
+## 1. Build training dataset
+
+Extract co-located ZEA patches from all three bands (same sky directions) and
+gaussianize each band independently.
+
+    python scripts/build_dataset_cib.py \
+        --n-patches 10000 \
+        --patch-size-deg 5 \
+        --pixel-size-arcmin 1.6 \
+        --out data/train_cib.npz
+
+Defaults to the three SPT-3G maps above; override with `--maps A B C --bands 095 150 220`.
+Saved keys: `x_train` (N, 3, H, W) gaussianized, `cib_patches` (N, 3, H, W)
+physical intensity (for the WPH prior/targets), `quantile_grid` (3, n_quantiles),
+`z_grid`, `y0` (3,), `bands`, plus patch metadata.
+
+------------------------------------------------------------------------------
+## 2. Fit the multi-channel WPH prior
+
+Per-channel + cross-band features, in the fixed block order
+`[auto95, auto150, auto220, cross(95,150), cross(95,220), cross(150,220)]`.
+
+    python scripts/build_wph_prior_cib.py \
+        --data data/train_cib.npz \
+        --n-patches 2000 \
+        --J 6 --L 4 --A 4 --dn 0 \
+        --augment-d4 \
+        --out runs/wph_prior_cib.npz
+
+`--augment-d4` applies the SAME D4 transform to all bands (preserves the
+inter-band relationship the cross blocks measure). The feature vector is ~6x
+the single-band length (3 auto + 3 cross blocks); `distribution`-mode whitening
+(step 3) eigendecomposes the full feature covariance, so that mode is heavier
+here — `persample` mode (below) only needs per-feature std and scales fine.
+
+------------------------------------------------------------------------------
+## 2b. Precompute per-sample WPH targets (for --wph-mode persample, recommended)
+
+    python scripts/precompute_wph_targets_cib.py \
+        --data data/train_cib.npz \
+        --wph-prior runs/wph_prior_cib.npz \
+        --out data/wph_targets_cib.npz
+
+Uses the prior's WPH config so the targets share its feature ordering.
+
+------------------------------------------------------------------------------
+## 3. Train the joint 3-channel flow-matching model
+
+Per-sample mode (recommended):
+
+    python scripts/train_fm_wph_cib.py \
+        --data data/train_cib.npz \
+        --wph-prior runs/wph_prior_cib.npz \
+        --wph-targets data/wph_targets_cib.npz \
+        --wph-mode persample \
+        --epochs 50 \
+        --batch-size 32 \
+        --lr 2e-4 \
+        --lambda-wph 1.0 \
+        --wph-t-min 0.5 \
+        --wph-warmup-epochs 5 \
+        --wph-chunk-size 1 \
+        --channels 64 128 256 \
+        --out checkpoints/fm_wph_cib.pkl
+
+The WPH feature cost is ~6x the single-band y model (3 auto + 3 cross blocks,
+each a per-patch FFT bank); keep `--wph-chunk-size 1` (sequential, cuFFT-safe)
+unless you have GPU memory headroom, then try 4/8. Drop `--wph-prior` for an
+FM-only baseline (validates the multichannel plumbing first). Distribution mode:
+`--wph-mode distribution` (no targets needed; heavier whitening).
+
+------------------------------------------------------------------------------
+## 4. Sample
+
+    python scripts/sample_fm_cib.py \
+        --ckpt checkpoints/fm_wph_cib.pkl \
+        --n-samples 16 \
+        --n-steps 30 \
+        --diagnostics \
+        --out samples/fm_cib.npz
+
+Heun ODE; output `(N, H, W, 3)` inverted per band to physical intensity.
+`--diagnostics` writes per-band 1-pt PDF + P(ell) vs. the training set. Inspect
+the inter-band correlation of `y_samples` (it should track the training
+patches' band-to-band correlation — that's the point of the joint model).
+
+Reflow (collapse 30 NFE -> 1-4) is band-agnostic; the y-pipeline's
+`precompute_reflow_pairs.py` / `train_reflow.py` work on the 3-channel
+checkpoint unchanged (paired (z, x) endpoints are just (N,H,W,3)).
+
+------------------------------------------------------------------------------
+## 5. Synthesize full-footprint maps
+
+    python scripts/synthesize_full_map_cib.py \
+        --ckpt checkpoints/fm_wph_cib.pkl \
+        --ra-min -50 --ra-max 50 --dec-min -70 --dec-max -40 \
+        --overlap 0.25 --n-steps 30 --batch-size 64 \
+        --out samples/spt1500_cib.fits
+
+One joint sample per patch -> all bands stay mutually consistent within a
+patch. Writes one FITS per band: `spt1500_cib_095ghz.fits`, `_150ghz.fits`,
+`_220ghz.fits` (shared ZEA WCS, common WEIGHT in HDU 1). Same tile-and-blend
+caveat as the y version: <5 deg structure correct, large-scale cross-seam
+modes not constrained.
+
+------------------------------------------------------------------------------
+## 6. Tests
+
+    JAX_PLATFORMS=cpu PYTHONPATH=src pytest tests/test_cib_smoke.py -q

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agorasynth"
+version = "0.1.0"
+description = "Amortized non-Gaussian Compton-y synthesis: flow matching with WPH-feature loss."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Yuuki Omori", email = "eos.xfc@gmail.com" }]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "tqdm>=4.66",
+    "jax>=0.4.30",
+    "jaxlib>=0.4.30",
+    "flax>=0.10",
+    "optax>=0.2.3",
+]
+
+[project.optional-dependencies]
+maps = [
+    "astropy>=6.0",
+    "healpy>=1.17",
+]
+viz = [
+    "matplotlib>=3.8",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agorasynth"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]

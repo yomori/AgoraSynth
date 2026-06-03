@@ -1,0 +1,273 @@
+# RUN
+
+Operational runbook for AgoraSynth. Run steps in order.
+
+------------------------------------------------------------------------------
+## 0. Environment
+
+    pip install -e ".[maps,viz,dev]"
+
+JAX must be installed against your CUDA version. On Perlmutter:
+
+    pip install -U "jax[cuda12]"
+
+------------------------------------------------------------------------------
+## 1. Build training dataset
+
+Extract ZEA patches from the Agora HEALPix y-map and Gaussianize.
+
+python scripts/build_dataset.py \
+    --map /global/cfs/cdirs/mp107c/yomori/agora/products/components/tsz/len/agora_ltszNG_bahamas80_bnd_unb_1.0e+12_1.0e+18_lensed.fits \
+    --n-patches 10000 \
+    --patch-size-deg 5 \
+    --pixel-size-arcmin 1.6 \
+    --out data/train.npz
+
+Saved keys: `x_train` (N, 1, H, W) gaussianized log-y, `y_patches` (N, H, W)
+physical y for the WPH prior fit, `quantile_grid`, `z_grid`, `y0`, plus the
+patch metadata. The `y_patches` field is the new bit AgoraSynth needs that
+AgoraScore does not save.
+
+------------------------------------------------------------------------------
+## 2. Fit the WPH prior
+
+python scripts/build_wph_prior.py \
+    --data data/train.npz \
+    --n-patches 2000 \
+    --J 6 --L 4 --A 4 --dn 0 \
+    --augment-d4 \
+    --out runs/wph_prior.npz
+
+`--augment-d4` augments each patch by its 8 D4-group transforms (rotations
+and reflections), giving 16,000 effective samples for the prior fit. With
+J=6 and L=4 the feature vector has ~1000 real components.
+
+------------------------------------------------------------------------------
+## 2b. Precompute per-sample WPH targets (only for --wph-mode persample)
+
+For per-sample WPH regression -- the recommended mode -- precompute the
+WPH feature vector for each training patch once (constant across training):
+
+    python scripts/precompute_wph_targets.py \
+        --data data/train.npz \
+        --wph-prior runs/wph_prior.npz \
+        --out data/wph_targets.npz
+
+The features use the same WPH config as the prior so they're compatible.
+Saves the (n_patches, n_features) array plus the per-feature std used to
+normalize the per-sample loss.
+
+------------------------------------------------------------------------------
+## 3. Train flow matching with WPH loss
+
+Per-sample mode (default, recommended) -- regresses each predicted clean
+sample's WPH features against its specific training-target features. Captures
+rare features (cluster cores) because cluster-containing patches contribute
+their WPH signature directly to the gradient.
+
+    python scripts/train_fm_wph.py \
+        --data data/train.npz \
+        --wph-prior runs/wph_prior.npz \
+        --wph-targets data/wph_targets.npz \
+        --wph-mode persample \
+        --epochs 50 \
+        --batch-size 64 \
+        --lr 2e-4 \
+        --lambda-wph 1.0 \
+        --wph-t-min 0.5 \
+        --wph-warmup-epochs 5 \
+        --channels 64 128 256 \
+        --out checkpoints/fm_wph.pkl
+
+Distribution mode (legacy) -- matches batch (mean, var) of WPH features to
+the prior's. Weak for rare features because the prior is dominated by the
+average patch, which is mostly cluster-free.
+
+    python scripts/train_fm_wph.py \
+        --data data/train.npz --wph-prior runs/wph_prior.npz \
+        --wph-mode distribution \
+        --epochs 50 --batch-size 64 --lr 2e-4 --lambda-wph 1.0 \
+        --wph-warmup-epochs 5 --channels 64 128 256 \
+        --out checkpoints/fm_wph_distribution.pkl
+
+Drop `--wph-prior` for a vanilla flow-matching A/B baseline.
+
+`lambda_wph` is the weight on the WPH term. `wph_warmup_epochs` linearly
+ramps lambda from 0 to its target over that many epochs -- prevents mode
+collapse from the huge initial WPH loss at random init. `wph_t_min` is the
+sigmoid-gate midpoint: WPH only kicks in for samples with t > 0.5 where the
+predicted clean field is reliable.
+
+------------------------------------------------------------------------------
+## 4. Sample
+
+    python scripts/sample_fm.py \
+        --ckpt checkpoints/fm_wph.pkl \
+        --n-samples 16 \
+        --n-steps 30 \
+        --plot \
+        --diagnostics \
+        --out samples/fm_wph.npz
+
+Heun (2nd-order) ODE integration; 30 steps = 60 NFE is usually enough for
+publication-quality samples. The diagnostics PNG compares the sample 1-pt
+PDF and P(ell) to the training set; the grid PNG shows samples and truth
+side-by-side with a shared color scale.
+
+For throughput tests, omit `--plot` and `--diagnostics`; otherwise the script
+loads the training set and computes FFT diagnostics after generation.
+
+------------------------------------------------------------------------------
+## 4b. Rectified-flow reflow (optional: collapse 30-NFE -> 1-4 NFE)
+
+After training, the velocity field's ODE trajectories are curved -- you
+need ~30 Heun steps for a clean sample. Reflow generates paired (z, x)
+data from the trained model and retrains the velocity to be approximately
+constant along straight lines from z to x. After 1-2 reflow rounds, a
+1-step Euler sampler (or 4-step Heun) gives near-Heun-30 quality.
+
+Generate ~10k paired (z, x) samples from the trained model:
+
+    python scripts/precompute_reflow_pairs.py \
+        --ckpt checkpoints/fm_only.pkl \
+        --n-pairs 10000 \
+        --n-steps 30 \
+        --batch-size 64 \
+        --out data/reflow_pairs.npz
+
+(Takes ~2-5 minutes.) Then retrain on the paired data, warm-starting from
+the original checkpoint:
+
+    python scripts/train_reflow.py \
+        --pairs data/reflow_pairs.npz \
+        --init-from-ckpt checkpoints/fm_only.pkl \
+        --epochs 20 \
+        --batch-size 64 \
+        --lr 1e-4 \
+        --out checkpoints/fm_rectified.pkl
+
+The `reflow_round` field in the checkpoint tracks how many rounds of
+reflow have been applied; you can stack rounds by passing a rectified
+checkpoint as `--init-from-ckpt` to a fresh `precompute_reflow_pairs.py`
++ `train_reflow.py`. Two rounds is usually plenty.
+
+After reflow, sample with fewer steps:
+
+    python scripts/sample_fm.py \
+        --ckpt checkpoints/fm_rectified.pkl \
+        --n-samples 16 \
+        --n-steps 4 \
+        --plot --out samples/fm_rectified.npz
+
+Compare quality at `--n-steps 1`, `4`, `30`. If `--n-steps 4` matches the
+original Heun-30, reflow worked; if even `--n-steps 1` is acceptable,
+you have a true 1-pass amortized prior.
+
+For maximum throughput after reflow, use the explicit one-pass sampler:
+
+    python scripts/sample_fm.py \
+        --ckpt checkpoints/fm_rectified.pkl \
+        --sampler euler \
+        --n-samples 16 \
+        --no-compare \
+        --out samples/fm_rectified_euler.npz
+
+`--sampler euler` is one U-Net evaluation: `x = z + v_theta(z, t=0)`.
+It is also useful as a deliberately rough prior from an unrectified
+checkpoint, but quality is expected to be much worse unless the checkpoint
+has been reflowed.
+
+------------------------------------------------------------------------------
+## 5. Synthesize a full footprint map
+
+Tile the model's 5 deg patches into a single FITS Compton-y map covering
+an arbitrary RA/Dec footprint.
+
+    python scripts/synthesize_full_map.py \
+        --ckpt checkpoints/fm_only.pkl \
+        --ra-min -50 --ra-max 50 \
+        --dec-min -70 --dec-max -40 \
+        --overlap 0.25 \
+        --n-steps 30 \
+        --batch-size 64 \
+        --out samples/spt1500_y.fits
+
+Use `--sampler euler` here too when the checkpoint has been rectified, or
+when an intentionally loose fast prior is more valuable than sample quality.
+
+Default tangent point is the footprint center. Patches overlap by 25% and
+are blended with a separable cosine window. Output is FITS with proper
+ZEA WCS in HDU 0; HDU 1 is the cosine-window weight map (0 outside the
+synthesis region).
+
+This is tile-and-blend (independent patches stitched in pixel space); the
+small-scale (<5 deg) structure is correct but large-scale modes across
+patch boundaries are not constrained. Fine for cluster-driven analyses;
+not appropriate if your science depends on >5 deg power.
+
+For coherent stitching (boundaries agree by construction, not by blending):
+
+    python scripts/synthesize_full_map_coherent.py \
+        --ckpt checkpoints/fm_only.pkl \
+        --ra-min -50 --ra-max 50 \
+        --dec-min -70 --dec-max -40 \
+        --overlap 0.25 \
+        --n-steps 30 \
+        --batch-size 64 \
+        --out samples/spt1500_y_coherent.fits
+
+This uses Repaint-style conditional sampling: each new patch's overlap
+with already-generated content is constrained to follow the linear
+flow-matching path during ODE integration, so the model fills in the
+rest of the patch consistently with that boundary. 4-color phase
+scheduling lets non-overlapping patches batch together for GPU
+efficiency. Cost: ~2x the tile-and-blend version (4 sequential phases),
+but produces a single coherent realization with no seams.
+
+------------------------------------------------------------------------------
+## 6. Benchmark full-map synthesis throughput
+
+`benchmark_full_map.py` runs the coherent stitcher N times in one Python
+process, paying JIT compile only once during a warmup pass. Useful for
+measuring GPU-bound per-map cost and for stacking N realizations of the
+same footprint to eyeball variance across draws.
+
+Baseline (Heun ODE, 30 steps, NFE=60 per patch):
+
+    python scripts/benchmark_full_map.py \
+        --ckpt checkpoints/fm_only.pkl \
+        --ra-min -50 --ra-max 50 --dec-min -70 --dec-max -40 \
+        --overlap 0.25 --n-steps 30 --batch-size 64 --n-rounds 10 \
+        --out samples/benchmark_fullmap_baseline.png
+
+Reference numbers (A100, 188 px patches, 6M-param UNet, 160 patches per
+SPT-1500 footprint at 25% overlap): warmup ~21 s, per-map ~9.65 s.
+
+After reflow (see step 4b), benchmark at fewer steps for a direct speedup
+comparison:
+
+    # 4-step Heun (NFE=8 per patch) — usually visually indistinguishable from baseline
+    python scripts/benchmark_full_map.py \
+        --ckpt checkpoints/fm_rectified.pkl \
+        --ra-min -50 --ra-max 50 --dec-min -70 --dec-max -40 \
+        --overlap 0.25 --n-steps 4 --batch-size 64 --n-rounds 10 \
+        --out samples/benchmark_fullmap_rectified_4step.png
+
+    # 1-step Heun (NFE=2 per patch) — fastest; needs a converged rectification
+    python scripts/benchmark_full_map.py \
+        --ckpt checkpoints/fm_rectified.pkl \
+        --ra-min -50 --ra-max 50 --dec-min -70 --dec-max -40 \
+        --overlap 0.25 --n-steps 1 --batch-size 64 --n-rounds 10 \
+        --out samples/benchmark_fullmap_rectified_1step.png
+
+Per-map cost scales linearly with NFE in the GPU-bound regime, so expect
+~1.3 s/map at NFE=8 and ~0.32 s/map at NFE=2 if the reflowed checkpoint
+converged. The PNG stacks all N maps as rows with a shared color scale --
+look for clear realization-to-realization variance in cluster placement
+(if rows look identical, seeding is broken; if rows look mode-collapsed,
+the model needs more capacity / training).
+
+------------------------------------------------------------------------------
+## 7. Tests
+
+    PYTHONPATH=src pytest -q
