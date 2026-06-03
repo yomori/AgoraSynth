@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
           f"{c} bands {args.bands}")
 
     hmaps = []
-    for band, mp in zip(args.bands, args.maps):
+    for band, mp in zip(args.bands, args.maps, strict=False):
         print(f"loading {band} GHz: {mp} ...")
         hm = hp.read_map(str(mp))
         print(f"  Nside={hp.get_nside(hm)}, {hm.size:,} pixels, "

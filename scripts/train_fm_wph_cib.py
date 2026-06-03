@@ -223,12 +223,14 @@ def main(argv: list[str] | None = None) -> int:
                     state, loss, l_fm, l_wph, step_key = train_step_fn(
                         state, batch, Ft, step_key
                     )
-                    running_fm += float(l_fm); running_wph += float(l_wph)
+                    running_fm += float(l_fm)
+                    running_wph += float(l_wph)
                 elif use_wph:
                     state, loss, l_fm, l_wph, step_key = train_step_fn(
                         state, batch, step_key
                     )
-                    running_fm += float(l_fm); running_wph += float(l_wph)
+                    running_fm += float(l_fm)
+                    running_wph += float(l_wph)
                 else:
                     state, loss, step_key = train_step_fn(state, batch, step_key)
                     running_fm += float(loss)

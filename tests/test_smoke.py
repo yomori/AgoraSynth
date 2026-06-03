@@ -11,7 +11,6 @@ optax = pytest.importorskip("optax")
 from agorasynth.data import gaussianize_patches, gaussianized_to_physical
 from agorasynth.flow_matching import (
     FlowMatchingTrainState,
-    fm_loss,
     make_fm_only_train_step,
     make_fm_reflow_train_step,
     make_train_step,
@@ -22,10 +21,9 @@ from agorasynth.flow_matching import (
     sample_heun_conditional,
     whitener_from_prior,
     wph_distribution_loss,
-    wph_persample_loss,
 )
 from agorasynth.unet import UNet
-from agorasynth.wph import WPHConfig, WPHOp, compute_S_batch, to_real_features
+from agorasynth.wph import WPHConfig, WPHOp
 
 
 def test_unet_forward_shape():

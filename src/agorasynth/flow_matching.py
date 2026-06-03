@@ -28,12 +28,12 @@ diffusion-quality samples at 1/10th the NFE.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable
+from typing import Any
 
 import jax
 import jax.numpy as jnp
-import optax
 from flax.training import train_state
 
 from .wph import WPHOp, _make_forward, _make_forward_cross, to_real_features

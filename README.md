@@ -1,6 +1,11 @@
 # AgoraSynth
 
-Amortized non-Gaussian Compton-y synthesis: rectified flow matching with a
+[![CI](https://github.com/yomori/AgoraSynth/actions/workflows/ci.yml/badge.svg)](https://github.com/yomori/AgoraSynth/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
+Amortized non-Gaussian Compton-y **and CIB** synthesis: rectified flow matching with a
 WPH-feature batch-distribution loss. Trained once, samples in one ODE
 integration (~30 NFE).
 
@@ -25,4 +30,32 @@ training graph — including the WPH operator — sits inside `jax.jit` and
 gradients flow cleanly through the inverse Gaussianization and through
 the WPH feature computation.
 
-See [`RUN`](RUN) for the operational runbook.
+## Components
+
+- **Compton-y** (single channel) — runbook [`RUN`](RUN).
+- **CIB** (joint SPT-3G 95/150/220 GHz; one U-Net emits all three bands from
+  shared noise, with per-channel + cross-band WPH features so inter-band
+  correlation is preserved) — runbook [`RUN_CIB`](RUN_CIB).
+
+## Installation
+
+```bash
+git clone https://github.com/yomori/AgoraSynth.git
+cd AgoraSynth
+pip install -e ".[dev,maps,viz]"
+```
+
+`jax`/`jaxlib` install CPU wheels by default; for GPU follow the
+[JAX install guide](https://jax.readthedocs.io/en/latest/installation.html).
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pre-commit install
+JAX_PLATFORMS=cpu pytest        # CPU-only smoke tests
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

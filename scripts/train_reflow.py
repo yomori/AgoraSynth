@@ -17,7 +17,6 @@ so the new velocity field begins close to the parent's and converges in
 from __future__ import annotations
 
 import argparse
-import math
 import pickle
 import sys
 import time

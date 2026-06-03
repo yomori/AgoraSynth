@@ -159,7 +159,10 @@ def main(argv: list[str] | None = None) -> int:
     quantile_grid = np.asarray(npz["quantile_grid"], dtype=np.float64)
     z_grid = np.asarray(npz["z_grid"], dtype=np.float64)
     y0 = float(npz["y0"])
-    print(f"  quantile_grid log-y in [{quantile_grid[0]:.2f}, {quantile_grid[-1]:.2f}]; y0={y0:.1e}")
+    print(
+        f"  quantile_grid log-y in [{quantile_grid[0]:.2f}, "
+        f"{quantile_grid[-1]:.2f}]; y0={y0:.1e}"
+    )
 
     # Build SPT-1500 ZEA grid.
     wcs, n_pix_x, n_pix_y, crpix_x, crpix_y = _build_zea_wcs(
@@ -192,7 +195,11 @@ def main(argv: list[str] | None = None) -> int:
     # Gaussianize: y -> x via log + interp on quantile_grid.
     print("gaussianizing truth ...")
     log_y = np.log(np.maximum(truth_y, 1e-30) + y0)
-    truth_x = np.interp(log_y.ravel(), quantile_grid, z_grid).reshape(truth_y.shape).astype(np.float32)
+    truth_x = (
+        np.interp(log_y.ravel(), quantile_grid, z_grid)
+        .reshape(truth_y.shape)
+        .astype(np.float32)
+    )
     print(
         f"  truth x: range [{truth_x.min():.3f}, {truth_x.max():.3f}], "
         f"mean {truth_x.mean():.3f}, std {truth_x.std():.3f}"
@@ -262,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         figsize=(14.0, 3.0 * len(panels) + 1),
         squeeze=False,
     )
-    for ax, (title, img, cmap) in zip(axes[:, 0], panels):
+    for ax, (title, img, cmap) in zip(axes[:, 0], panels, strict=False):
         kwargs = dict(cmap=cmap, origin="lower", aspect="equal")
         if "std" not in title:
             kwargs["vmin"] = vmin

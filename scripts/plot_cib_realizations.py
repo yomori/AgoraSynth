@@ -87,7 +87,8 @@ def main(argv: list[str] | None = None) -> int:
             ax = axes[ch, col]
             im = ax.imshow(panels[col], cmap=args.cmap, origin="lower",
                            vmin=vmin, vmax=vmax)
-            ax.set_xticks([]); ax.set_yticks([])
+            ax.set_xticks([])
+            ax.set_yticks([])
             if ch == 0:
                 ax.set_title(titles[col], fontsize=10)
             if col == 0:

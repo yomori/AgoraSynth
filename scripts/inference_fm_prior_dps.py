@@ -46,7 +46,6 @@ import jax.numpy as jnp  # noqa: E402
 
 from agorasynth.unet import UNet  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # SHT-project the Agora HEALPix truth onto the global ZEA grid
 # (mirror of inference_simple.py / benchmark_full_map.py)
@@ -265,7 +264,11 @@ def main(argv: list[str] | None = None) -> int:
 
     # ----- gaussianize
     log_y = np.log(np.maximum(truth_y, 1e-30) + y0)
-    truth_x = np.interp(log_y.ravel(), quantile_grid, z_grid).reshape(truth_y.shape).astype(np.float32)
+    truth_x = (
+        np.interp(log_y.ravel(), quantile_grid, z_grid)
+        .reshape(truth_y.shape)
+        .astype(np.float32)
+    )
     print(
         f"  truth x: range [{truth_x.min():.3f}, {truth_x.max():.3f}], "
         f"std {truth_x.std():.3f}"
@@ -332,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
         figsize=(14.0, 3.0 * len(panels) + 1),
         squeeze=False,
     )
-    for ax, (title, img, cmap) in zip(axes[:, 0], panels):
+    for ax, (title, img, cmap) in zip(axes[:, 0], panels, strict=False):
         kwargs = dict(cmap=cmap, origin="lower", aspect="equal")
         if "std" not in title:
             kwargs["vmin"] = args.vmin

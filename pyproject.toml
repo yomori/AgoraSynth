@@ -5,11 +5,21 @@ build-backend = "hatchling.build"
 [project]
 name = "agorasynth"
 version = "0.1.0"
-description = "Amortized non-Gaussian Compton-y synthesis: flow matching with WPH-feature loss."
+description = "Amortized non-Gaussian sky-component synthesis (Compton-y, CIB): flow matching with a WPH-feature loss."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Yuuki Omori", email = "eos.xfc@gmail.com" }]
+keywords = ["cosmology", "CMB", "Compton-y", "CIB", "flow-matching", "generative", "WPH"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",
@@ -31,7 +41,13 @@ viz = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.8",
+    "pre-commit>=3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/yomori/AgoraSynth"
+Repository = "https://github.com/yomori/AgoraSynth"
+Issues = "https://github.com/yomori/AgoraSynth/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agorasynth"]
@@ -48,3 +64,15 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use pytest.importorskip(...) before importing the package, so the
+# package imports legitimately are not at the top of the file.
+"tests/*" = ["E402"]
+# The optimizer-loop closures in wph.py are defined AND consumed within the
+# same loop iteration (no deferred execution) -> B023 is a false positive.
+"src/agorasynth/wph.py" = ["B023"]
+
+[tool.ruff.lint.isort]
+# Keep aliased re-exports (`X as Y`) in one combined import block.
+combine-as-imports = true

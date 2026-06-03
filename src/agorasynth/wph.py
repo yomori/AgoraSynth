@@ -31,9 +31,7 @@ from __future__ import annotations
 
 import ast
 import json
-from collections.abc import Sequence
 from dataclasses import dataclass, field
-from itertools import chain, product
 from pathlib import Path
 from typing import Any
 
@@ -398,11 +396,14 @@ class WPHOp:
     phi_f: jnp.ndarray            # (n_phi, M, N) float64
 
     @classmethod
-    def build(cls, config: WPHConfig, *, dtype: jnp.dtype = jnp.float32) -> "WPHOp":
+    def build(cls, config: WPHConfig, *, dtype: jnp.dtype = jnp.float32) -> WPHOp:
         psi, _ = build_psi_bank(config.filter_config())
         phi, _ = build_phi_bank(config.filter_config())
         psi_jax = jnp.asarray(psi, dtype=dtype)
-        phi_jax = jnp.asarray(phi, dtype=dtype) if phi.size else jnp.zeros((0, config.M, config.N), dtype)
+        phi_jax = (
+            jnp.asarray(phi, dtype=dtype) if phi.size
+            else jnp.zeros((0, config.M, config.N), dtype)
+        )
         table = build_moment_table(config)
         return cls(config=config, table=table, psi_f=psi_jax, phi_f=phi_jax)
 
@@ -801,7 +802,7 @@ class WPHPriorStats:
         )
 
     @classmethod
-    def load(cls, path: Path) -> "WPHPriorStats":
+    def load(cls, path: Path) -> WPHPriorStats:
         data = np.load(path, allow_pickle=False)
         cfg_dict = ast.literal_eval(str(data["config_json"]))
         cfg = WPHConfig(
@@ -1077,9 +1078,9 @@ def synthesize_from_prior(
     init_std_arr = np.broadcast_to(np.atleast_1d(init_std_arr), (n_samples,))
 
     if init_kind not in ("white_noise", "softplus"):
-        raise ValueError(f"init_kind must be 'white_noise' or 'softplus'")
+        raise ValueError("init_kind must be 'white_noise' or 'softplus'")
     if method not in ("lbfgs", "adam"):
-        raise ValueError(f"method must be 'lbfgs' or 'adam'")
+        raise ValueError("method must be 'lbfgs' or 'adam'")
     if init_kind == "softplus" and not nonneg:
         # Legacy combo only made sense with nonneg=True.
         nonneg = True
@@ -1091,7 +1092,7 @@ def synthesize_from_prior(
         return u * win
 
     if loss_norm not in ("none", "abs_target"):
-        raise ValueError(f"loss_norm must be 'none' or 'abs_target'")
+        raise ValueError("loss_norm must be 'none' or 'abs_target'")
 
     def make_loss(t_S: jnp.ndarray, init_std_val: float):
         if loss_norm == "abs_target":

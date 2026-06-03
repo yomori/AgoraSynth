@@ -8,7 +8,7 @@ shape and ``C_in`` channels (predicting the velocity ``dx/dt``).
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 import flax.linen as nn
 import jax
@@ -118,7 +118,7 @@ class UNet(nn.Module):
         for _ in range(self.bottleneck_blocks):
             h = ResBlock(self.channels[-1])(h, t_emb)
 
-        for skip, ch in zip(reversed(skips), reversed(self.channels)):
+        for skip, ch in zip(reversed(skips), reversed(self.channels), strict=False):
             new_shape = (h.shape[0], h.shape[1] * 2, h.shape[2] * 2, h.shape[3])
             h = jax.image.resize(h, new_shape, method="nearest")
             h = nn.Conv(ch, (3, 3), padding="SAME")(h)

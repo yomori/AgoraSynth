@@ -521,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"  WPH prior {args.wph_prior} not found; skipping WPH panel")
 
-    print(f"plotting diagnostics ...")
+    print("plotting diagnostics ...")
     n_panels = 3 if wph_per_map is not None else 2
     # Two rows: top = stat itself, bottom = (real - truth) / sigma_real residual
     fig, axes = plt.subplots(
