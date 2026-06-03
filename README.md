@@ -4,9 +4,30 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-Amortized non-Gaussian Compton-y **and CIB** synthesis: rectified flow matching with a
-WPH-feature batch-distribution loss. Trained once, samples in one ODE
-integration (~30 NFE).
+**AgoraSynth generates realistic mock maps of the millimeter-wave sky** — the
+thermal Sunyaev-Zel'dovich (Compton-y) signal and the Cosmic Infrared Background
+(CIB) at SPT-3G's 95 / 150 / 220 GHz — that look statistically like a full
+cosmological simulation but are produced by a trained neural network in seconds
+(a full survey footprint in minutes).
+
+Why: cosmology analyses need *many* realistic mock skies — to test pipelines,
+estimate covariances, and validate methods — but running full hydrodynamic
+simulations for each is expensive. AgoraSynth learns the rich, non-Gaussian
+structure (galaxy clusters, dusty-galaxy point sources, filaments, and the
+correlations *between* frequency bands) from a single expensive simulation (the
+Agora suite), then lets you draw as many fresh, independent realizations as you
+want.
+
+How, in one line: it's a **generative model** — a flow-matching neural network
+(same family as diffusion models) that turns random noise into a realistic sky
+patch in ~30 fast steps. A second ingredient, a **Wavelet Phase Harmonic (WPH)**
+loss, locks in the higher-order textures that a plain power-spectrum match would
+miss.
+
+## How it works
+
+Amortized non-Gaussian synthesis: rectified flow matching with a WPH-feature
+batch-distribution loss. Trained once, samples in one ODE integration (~30 NFE).
 
 The pipeline:
 
